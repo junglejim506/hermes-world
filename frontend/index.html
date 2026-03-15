@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Hermes World</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #0a0a0f; color: #e0e0e0; font-family: 'JetBrains Mono', 'Fira Code', monospace; overflow: hidden; }
+
+    #canvas-container { position: fixed; inset: 0; }
+
+    /* HUD sidebar */
+    #hud {
+      position: fixed; top: 0; right: 0; width: 320px; height: 100vh;
+      background: rgba(10,10,20,0.85); backdrop-filter: blur(8px);
+      border-left: 1px solid rgba(255,255,255,0.08);
+      display: flex; flex-direction: column; overflow: hidden;
+      z-index: 10;
+    }
+
+    #hud-header {
+      padding: 16px; border-bottom: 1px solid rgba(255,255,255,0.08);
+      flex-shrink: 0;
+    }
+    #hud-header h1 { font-size: 13px; color: #7c6af7; letter-spacing: 0.1em; text-transform: uppercase; }
+    #hud-scenario { font-size: 11px; color: #888; margin-top: 6px; line-height: 1.5; }
+    #hud-round { font-size: 11px; color: #bbb; margin-top: 6px; }
+    #hud-countdown { font-size: 11px; color: #666; }
+
+    #hud-body { flex: 1; overflow-y: auto; padding: 12px; scrollbar-width: thin; scrollbar-color: #333 transparent; }
+
+    .hud-section { margin-bottom: 16px; }
+    .hud-section-title {
+      font-size: 10px; text-transform: uppercase; letter-spacing: 0.12em;
+      color: #555; margin-bottom: 8px; padding-bottom: 4px;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+
+    /* Stance bar */
+    #stance-bars { display: flex; flex-direction: column; gap: 4px; }
+    .stance-bar-row { display: flex; align-items: center; gap: 8px; font-size: 11px; }
+    .stance-bar-label { width: 90px; color: #aaa; flex-shrink: 0; }
+    .stance-bar-track { flex: 1; height: 6px; background: rgba(255,255,255,0.07); border-radius: 3px; overflow: hidden; }
+    .stance-bar-fill { height: 100%; border-radius: 3px; transition: width 0.8s ease; }
+    .fill-utilitarian { background: #2dd4bf; }
+    .fill-deontological { background: #f87171; }
+    .fill-undecided { background: #fbbf24; }
+    .stance-bar-count { width: 18px; text-align: right; color: #666; font-size: 10px; flex-shrink: 0; }
+
+    /* World stats */
+    #world-stats { display: flex; flex-direction: column; gap: 4px; }
+    .stat-row { display: flex; justify-content: space-between; font-size: 11px; }
+    .stat-key { color: #777; }
+    .stat-val { color: #ddd; }
+
+    /* Feed */
+    #feed { display: flex; flex-direction: column; gap: 6px; }
+    .feed-entry {
+      font-size: 11px; line-height: 1.5; padding: 6px 8px;
+      background: rgba(255,255,255,0.03); border-radius: 4px;
+      border-left: 2px solid transparent;
+    }
+    .feed-entry.speak { border-left-color: #7c6af7; }
+    .feed-entry.use_skill { border-left-color: #2dd4bf; }
+    .feed-entry.learn_skill { border-left-color: #fbbf24; }
+    .feed-entry.idle { border-left-color: #333; color: #555; }
+    .feed-agent { color: #bbb; font-weight: bold; }
+    .feed-content { color: #888; display: block; margin-top: 2px; }
+
+    /* Skill registry */
+    #skill-list { display: flex; flex-direction: column; gap: 4px; }
+    .skill-entry { font-size: 11px; color: #888; }
+    .skill-name { color: #fbbf24; }
+    .skill-owner { color: #666; }
+
+    /* Agent inspector */
+    #inspector {
+      position: fixed; left: 20px; bottom: 20px; width: 260px;
+      background: rgba(10,10,20,0.92); backdrop-filter: blur(8px);
+      border: 1px solid rgba(255,255,255,0.1); border-radius: 8px;
+      padding: 14px; z-index: 20; display: none;
+    }
+    #inspector-name { font-size: 13px; color: #e0e0e0; font-weight: bold; }
+    #inspector-role { font-size: 11px; color: #888; margin-top: 2px; }
+    #inspector-stance { font-size: 11px; margin-top: 8px; }
+    #inspector-skills { font-size: 11px; color: #fbbf24; margin-top: 6px; }
+    #inspector-action { font-size: 11px; color: #aaa; margin-top: 8px; line-height: 1.5; }
+    #inspector-close {
+      position: absolute; top: 8px; right: 10px; cursor: pointer;
+      color: #555; font-size: 16px; line-height: 1;
+    }
+    #inspector-close:hover { color: #bbb; }
+
+    /* Status badge */
+    #status-badge {
+      position: fixed; top: 16px; left: 16px; z-index: 20;
+      font-size: 11px; padding: 4px 10px; border-radius: 12px;
+      background: rgba(10,10,20,0.8); border: 1px solid rgba(255,255,255,0.1);
+      color: #666;
+    }
+    #status-badge.running { color: #2dd4bf; border-color: rgba(45,212,191,0.3); }
+    #status-badge.idle { color: #666; }
+
+    /* Intervene bar */
+    #intervene-bar {
+      position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+      width: 500px; max-width: calc(100vw - 360px);
+      display: flex; gap: 8px; z-index: 20;
+    }
+    #intervene-input {
+      flex: 1; background: rgba(10,10,20,0.9); border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 6px; padding: 8px 12px; color: #e0e0e0; font-size: 12px;
+      font-family: inherit; outline: none;
+    }
+    #intervene-input:focus { border-color: rgba(124,106,247,0.5); }
+    #intervene-input::placeholder { color: #444; }
+    #intervene-btn {
+      background: #7c6af7; border: none; border-radius: 6px; padding: 8px 16px;
+      color: white; font-size: 12px; cursor: pointer; font-family: inherit;
+      white-space: nowrap;
+    }
+    #intervene-btn:hover { background: #6c5ae7; }
+    #tick-btn {
+      background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 6px; padding: 8px 12px; color: #aaa; font-size: 12px;
+      cursor: pointer; font-family: inherit; white-space: nowrap;
+    }
+    #tick-btn:hover { background: rgba(255,255,255,0.1); }
+
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+  </style>
+</head>
+<body>
+  <div id="canvas-container"></div>
+
+  <div id="status-badge" class="idle">● idle</div>
+
+  <!-- HUD Sidebar -->
+  <div id="hud">
+    <div id="hud-header">
+      <h1>Hermes World</h1>
+      <div id="hud-scenario">No simulation running.</div>
+      <div id="hud-round">Round —</div>
+      <div id="hud-countdown"></div>
+    </div>
+    <div id="hud-body">
+      <div class="hud-section">
+        <div class="hud-section-title">Stance Distribution</div>
+        <div id="stance-bars">
+          <div class="stance-bar-row">
+            <span class="stance-bar-label">Utilitarian</span>
+            <div class="stance-bar-track"><div class="stance-bar-fill fill-utilitarian" id="bar-utilitarian" style="width:0%"></div></div>
+            <span class="stance-bar-count" id="cnt-utilitarian">0</span>
+          </div>
+          <div class="stance-bar-row">
+            <span class="stance-bar-label">Deontological</span>
+            <div class="stance-bar-track"><div class="stance-bar-fill fill-deontological" id="bar-deontological" style="width:0%"></div></div>
+            <span class="stance-bar-count" id="cnt-deontological">0</span>
+          </div>
+          <div class="stance-bar-row">
+            <span class="stance-bar-label">Undecided</span>
+            <div class="stance-bar-track"><div class="stance-bar-fill fill-undecided" id="bar-undecided" style="width:0%"></div></div>
+            <span class="stance-bar-count" id="cnt-undecided">0</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="hud-section">
+        <div class="hud-section-title">World Stats</div>
+        <div id="world-stats"></div>
+      </div>
+
+      <div class="hud-section">
+        <div class="hud-section-title">This Round</div>
+        <div id="feed"></div>
+      </div>
+
+      <div class="hud-section">
+        <div class="hud-section-title">Skill Registry</div>
+        <div id="skill-list"><span style="color:#444;font-size:11px">No skills learned yet.</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Agent Inspector -->
+  <div id="inspector">
+    <span id="inspector-close" onclick="closeInspector()">×</span>
+    <div id="inspector-name">—</div>
+    <div id="inspector-role">—</div>
+    <div id="inspector-stance"></div>
+    <div id="inspector-skills"></div>
+    <div id="inspector-action"></div>
+  </div>
+
+  <!-- Intervene bar -->
+  <div id="intervene-bar">
+    <input id="intervene-input" type="text" placeholder="Intervene: 'introduce a storm', 'add a new agent', 'reduce supplies by 20%'…" />
+    <button id="tick-btn" onclick="triggerTick()">▶ Tick</button>
+    <button id="intervene-btn" onclick="sendIntervention()">Intervene</button>
+  </div>
+
+  <script type="module" src="/static/world.js"></script>
+</body>
+</html>
