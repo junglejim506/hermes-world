@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="frontend/logo.png" alt="Hermes World" width="300" />
+</p>
+
 # Hermes World
 
 A universal agent simulation framework built on [Hermes Agent](https://github.com/NousResearch/hermes-agent) — Nous Research Hackathon submission.
@@ -30,9 +34,20 @@ cd hermes-world
 bash install.sh
 ```
 
+`install.sh` will:
+- Check for Hermes installation
+- Install Python dependencies
+- Create `.env` from `.env.example` (edit to add your Telegram ID)
+- Set up skill directories and symlinks
+- Initialize `world_state.json`
+
 Start the backend:
 
 ```bash
+# Use Hermes venv Python (recommended)
+~/.hermes/hermes-agent/venv/bin/python3 server.py
+
+# Or system Python
 python3 server.py
 ```
 
@@ -43,6 +58,22 @@ python3 orchestrator.py "10 people stranded on a raft. Supplies for 7. Storm las
 ```
 
 Open **http://localhost:8000** to watch the simulation live.
+
+### Configuration
+
+Copy `.env.example` to `.env` and edit:
+
+```bash
+cp .env.example .env
+```
+
+| Variable | Description |
+|----------|-------------|
+| `TELEGRAM_HOME_CHANNEL` | Your Telegram user/channel ID for round summaries |
+| `ROUND_INTERVAL_MINUTES` | Minutes between rounds (default: 5) |
+| `AGENT_DELAY_SECONDS` | Delay between agent API calls to avoid rate limits (default: 3) |
+
+Telegram is optional — the simulation runs fine without it.
 
 ---
 

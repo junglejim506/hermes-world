@@ -1,6 +1,7 @@
 """
 persona_generator.py — Generate agent personas from a scenario string using Hermes.
 """
+from __future__ import annotations
 
 import json
 import os

@@ -1,6 +1,7 @@
 """
 scene_classifier.py — Map scenario text to scene type and world stat schema.
 """
+from __future__ import annotations
 
 SCENE_TYPES = {
     "raft": {
@@ -32,6 +33,12 @@ SCENE_TYPES = {
         "world_stats": {"consensus_pct": 0, "evidence_weight": 50, "hours_in_deliberation": 0, "events": []},
         "available_skills": ["argue", "cross_examine", "present_evidence", "deliberate", "vote"],
         "stat_labels": {"consensus_pct": "Consensus %", "evidence_weight": "Evidence Weight"},
+    },
+    "prison": {
+        "keywords": ["prison", "escape", "inmate", "guard", "cell", "warden", "transfer", "solitary", "lockdown", "sentence"],
+        "world_stats": {"security_level": 80, "morale": 60, "contraband": 20, "hours_remaining": 48, "guard_alertness": 70, "events": []},
+        "available_skills": ["pick_lock", "dig", "disguise", "bribe", "distract", "map_routes", "signal"],
+        "stat_labels": {"security_level": "Security %", "morale": "Morale %", "contraband": "Contraband", "hours_remaining": "Hours Left", "guard_alertness": "Guards %"},
     },
 }
 

@@ -4,6 +4,7 @@ telegram_reporter.py — Send round summaries via Hermes's built-in Telegram gat
 No bot token setup needed — uses the gateway already configured in ~/.hermes/.
 The Hermes gateway must be running: `hermes gateway start`
 """
+from __future__ import annotations
 
 import json
 import os
@@ -16,8 +17,15 @@ if str(_hermes_agent) not in sys.path:
     sys.path.insert(0, str(_hermes_agent))
 
 
-def _send(message: str, target: str = "telegram") -> dict:
+def _send(message: str, target: str = None) -> dict:
     """Send a message via Hermes gateway send_message_tool."""
+    if target is None:
+        # Use configured home channel from env, or let Hermes use its default
+        channel = os.environ.get("TELEGRAM_HOME_CHANNEL")
+        if channel:
+            target = f"telegram:{channel}" if not channel.startswith("telegram") else channel
+        else:
+            target = "telegram"  # Falls back to Hermes gateway default
     try:
         from tools.send_message_tool import send_message_tool
         result = send_message_tool({"action": "send", "target": target, "message": message})

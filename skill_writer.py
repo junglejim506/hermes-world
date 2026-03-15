@@ -5,6 +5,7 @@ At runtime, skills are written to skills/agents/{agent_id}/{skill_name}/SKILL.md
 inside the project directory. install.sh symlinks this folder into ~/.hermes/skills/
 so Hermes picks them up automatically.
 """
+from __future__ import annotations
 
 import os
 from pathlib import Path

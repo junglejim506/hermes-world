@@ -7,6 +7,7 @@ Usage:
     python3 orchestrator.py --tick   # run a single round tick (called by cron)
     python3 orchestrator.py --reset  # wipe world state and start fresh
 """
+from __future__ import annotations
 
 import argparse
 import json
@@ -41,6 +42,9 @@ def _load_hermes_config() -> tuple[str, str | None]:
     return "openrouter/hunter-alpha", None
 
 
+# Global model config for scene generation
+model, base_url = _load_hermes_config()
+
 # ── World state helpers ────────────────────────────────────────────────────────
 def load_state() -> dict:
     if WORLD_STATE_PATH.exists():
@@ -55,6 +59,136 @@ def save_state(state: dict):
     print(f"[orchestrator] State saved — round {state.get('round', 0)}")
 
 
+# ── Scene Auto-Generation ────────────────────────────────────────────────────
+def _ensure_scene_exists(scenario: str, scene_type: str) -> str:
+    """If scene doesn't exist, generate it via Hermes subagent before starting."""
+    from scene_classifier import SCENE_TYPES, DEFAULT_SCENE
+    
+    if scene_type != DEFAULT_SCENE:
+        return scene_type  # Known scene, all good
+    
+    # Check if scenario actually matches the default scene's keywords
+    from scene_classifier import classify_scene
+    text = scenario.lower()
+    default_keywords = SCENE_TYPES[DEFAULT_SCENE]["keywords"]
+    if any(kw in text for kw in default_keywords):
+        return DEFAULT_SCENE  # Actually matches raft scenario
+    
+    # Unknown scene — generate it
+    print(f"[orchestrator] Unknown scene type for: {scenario[:60]}...")
+    print(f"[orchestrator] Generating scene via Hermes subagent...")
+    
+    # Use Python to generate scene config directly
+    import re
+    scene_slug = re.sub(r'[^a-z0-9]+', '_', scenario.lower().split('.')[0].split(',')[0])[:30].strip('_')
+    if not scene_slug:
+        scene_slug = "custom"
+    
+    # Generate scene config via LLM
+    from run_agent import AIAgent
+    agent = AIAgent(
+        model=model,
+        base_url=base_url,
+        max_iterations=3,
+        skip_context_files=True,
+        skip_memory=True,
+        quiet_mode=True,
+    )
+    
+    prompt = f"""Generate a JSON config for a simulation scene. Return ONLY valid JSON.
+
+Scenario: {scenario}
+
+Required JSON format:
+{{
+  "scene_type": "{scene_slug}",
+  "keywords": ["keyword1", "keyword2", ...],
+  "world_stats": {{"stat1": value, "stat2": value}},
+  "available_skills": ["skill1", "skill2", ...],
+  "stat_labels": {{"stat1": "Display Label", "stat2": "Display Label"}}
+}}
+
+Make the stats, skills, and keywords specific to this scenario. Include 4-6 world stats, 5-7 skills, 5-10 keywords."""
+
+    result = agent.run_conversation(
+        user_message="Generate the scene config JSON.",
+        system_message=prompt,
+    )
+    
+    raw = result.get("response", "")
+    match = re.search(r'\{[\s\S]*\}', raw)
+    if match:
+        try:
+            config = json.loads(match.group(0))
+            # Add to scene_classifier dynamically
+            SCENE_TYPES[scene_slug] = {
+                "keywords": config.get("keywords", []),
+                "world_stats": config.get("world_stats", {}),
+                "available_skills": config.get("available_skills", []),
+                "stat_labels": config.get("stat_labels", {}),
+            }
+            print(f"[orchestrator] Generated scene: {scene_slug}")
+            
+            # Generate Three.js scene file
+            _generate_frontend_scene(scene_slug, scenario)
+            
+            return scene_slug
+        except json.JSONDecodeError:
+            pass
+    
+    print(f"[orchestrator] Scene generation failed, using default: {DEFAULT_SCENE}")
+    return DEFAULT_SCENE
+
+
+def _generate_frontend_scene(scene_type: str, scenario: str):
+    """Generate a Three.js scene file for the frontend."""
+    scene_path = PROJECT_ROOT / "frontend" / "scenes" / f"{scene_type}.js"
+    if scene_path.exists():
+        return
+    
+    # Create a basic scene that works with the existing engine
+    scene_code = f'''// {scene_type.title()} Scene — Auto-generated
+export function create{scene_type.title().replace("_", "")}Scene(scene, THREE) {{
+  // Ground
+  const groundGeo = new THREE.PlaneGeometry(20, 20);
+  const groundMat = new THREE.MeshStandardMaterial({{ 
+    color: 0x1a1a2e,
+    roughness: 0.8 
+  }});
+  const ground = new THREE.Mesh(groundGeo, groundMat);
+  ground.rotation.x = -Math.PI / 2;
+  ground.position.y = -0.5;
+  scene.add(ground);
+  
+  // Ambient lighting
+  const ambient = new THREE.AmbientLight(0x404060, 0.5);
+  scene.add(ambient);
+  
+  // Directional light
+  const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+  dirLight.position.set(5, 10, 5);
+  scene.add(dirLight);
+  
+  // Background
+  scene.background = new THREE.Color(0x0a0a1a);
+  scene.fog = new THREE.Fog(0x0a0a1a, 10, 30);
+}}
+'''
+    scene_path.write_text(scene_code)
+    
+    # Update world.js to include the new scene
+    world_js = PROJECT_ROOT / "frontend" / "world.js"
+    if world_js.exists():
+        content = world_js.read_text()
+        import_line = f"import {{ create{scene_type.title().replace('_', '')}Scene }} from './scenes/{scene_type}.js';"
+        if import_line not in content:
+            # Add import at top
+            content = import_line + "\\n" + content
+            world_js.write_text(content)
+    
+    print(f"[orchestrator] Generated frontend scene: {scene_path.name}")
+
+
 # ── Bootstrap ─────────────────────────────────────────────────────────────────
 def bootstrap(scenario: str, n_agents: int, round_interval: int) -> dict:
     """Build initial world state from scenario text."""
@@ -63,6 +197,7 @@ def bootstrap(scenario: str, n_agents: int, round_interval: int) -> dict:
 
     print(f"[orchestrator] Classifying scenario...")
     scene_type = classify_scene(scenario)
+    scene_type = _ensure_scene_exists(scenario, scene_type)
     scene_cfg = get_scene_config(scene_type)
     print(f"[orchestrator] Scene type: {scene_type}")
 

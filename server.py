@@ -8,6 +8,7 @@ Usage:
     python3 server.py
     python3 server.py --port 8000 --host 0.0.0.0
 """
+from __future__ import annotations
 
 import argparse
 import asyncio

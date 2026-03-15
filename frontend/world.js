@@ -12,6 +12,7 @@ import { buildScene as buildOfficeScene } from '/static/scenes/office.js';
 import { buildScene as buildVillageScene } from '/static/scenes/village.js';
 import { buildScene as buildSpaceScene } from '/static/scenes/space.js';
 import { buildScene as buildCourtroomScene } from '/static/scenes/courtroom.js';
+import { buildScene as buildPrisonScene } from '/static/scenes/prison.js';
 
 // ── Renderer & Camera ─────────────────────────────────────────────────────────
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -44,6 +45,7 @@ const SCENE_BUILDERS = {
   village: buildVillageScene,
   space: buildSpaceScene,
   courtroom: buildCourtroomScene,
+  prison: buildPrisonScene,
 };
 
 function initScene(sceneType) {

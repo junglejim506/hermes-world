@@ -2,6 +2,7 @@
 round_runner.py — Spawn one Hermes subagent per agent in parallel, collect decisions,
 apply them to world state, and update world_state.json.
 """
+from __future__ import annotations
 
 import json
 import os
@@ -12,8 +13,12 @@ import random
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
+import time as _time
 
 sys.path.insert(0, str(Path(os.environ.get("HERMES_HOME", Path.home() / ".hermes")) / "hermes-agent"))
+
+# Rate limiting: stagger parallel agent calls to avoid API rate limits
+_AGENT_DELAY_SECONDS = float(os.environ.get("AGENT_DELAY_SECONDS", "3"))
 
 from skill_writer import write_skill, skill_exists
 
@@ -25,12 +30,17 @@ Your background: {background}
 Your core values: {values}
 Your current stance: {stance}
 Your skills: {skills}
-Your memory: {memory_summary}
 
 Current world state:
 {world_state_summary}
 
-Round {round_num} begins. You must decide what to do this round.
+Previous round dialogue:
+{previous_round_dialogue}
+
+Your memory of past rounds:
+{memory_summary}
+
+Round {round_num} begins. You must decide what to do this round. React to what others said and did. Build on the conversation. Disagree, agree, propose alternatives, form alliances.
 
 Respond with ONLY a JSON object in this exact format:
 {{
@@ -49,6 +59,47 @@ Rules:
 - stance_shift is only non-null if you changed your mind this round.
 - Be specific and in-character. Your decisions should reflect your values and background.
 - No markdown, no explanation outside the JSON."""
+
+
+def _previous_round_dialogue(state: dict) -> str:
+    """Get the previous round's actions formatted as dialogue."""
+    round_log = state.get("round_log", [])
+    if not round_log:
+        return "No previous actions yet — this is the first round."
+    
+    current_round = state.get("round", 0)
+    prev_round = current_round - 1
+    
+    if prev_round < 1:
+        return "No previous actions yet — this is the first round."
+    
+    # Get actions from previous round
+    prev_actions = [e for e in round_log if isinstance(e, dict) and e.get("round") == prev_round]
+    
+    if not prev_actions:
+        return "No actions recorded from the previous round."
+    
+    lines = []
+    for entry in prev_actions:
+        agent_name = entry.get("agent_id", "Unknown")
+        action = entry.get("action", {})
+        atype = action.get("type", "idle")
+        content = action.get("content", "")
+        target = action.get("target", "")
+        
+        if atype == "idle":
+            lines.append(f"- {agent_name}: *said nothing, observed quietly*")
+        elif atype == "speak":
+            addr = f" (to {target})" if target and target != "group" else ""
+            lines.append(f"- {agent_name}{addr}: \"{content}\"")
+        elif atype == "use_skill":
+            lines.append(f"- {agent_name}: *used skill on {target}: \"{content[:100]}\"*")
+        elif atype == "learn_skill":
+            lines.append(f"- {agent_name}: *learned a new skill: {content[:100]}*")
+        else:
+            lines.append(f"- {agent_name}: {atype} — {content[:100]}")
+    
+    return "\n".join(lines) if lines else "The previous round passed in silence."
 
 
 def _world_state_summary(state: dict) -> str:
@@ -88,6 +139,7 @@ def _run_agent_subagent(agent: dict, state: dict, model: str, base_url: str) -> 
         skills=", ".join(agent.get("skills", [])),
         memory_summary=agent.get("memory_summary", "No prior history."),
         world_state_summary=_world_state_summary(state),
+        previous_round_dialogue=_previous_round_dialogue(state),
         round_num=state["round"],
     )
 
@@ -103,7 +155,7 @@ def _run_agent_subagent(agent: dict, state: dict, model: str, base_url: str) -> 
         user_message="Make your decision for this round.",
         system_message=prompt,
     )
-    raw = result.get("response", "")
+    raw = result.get("final_response", "") or result.get("response", "")
     match = re.search(r'\{[\s\S]*\}', raw)
     if match:
         try:
@@ -240,20 +292,17 @@ def run_round(state: dict, model: str, base_url: str, max_workers: int = 4) -> d
     print(f"[round_runner] Starting round {state['round']} with {len(agents)} agents...")
 
     decisions = []
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {
-            executor.submit(_run_agent_subagent, agent, state, model, base_url): agent
-            for agent in agents
-        }
-        for future in as_completed(futures):
-            agent = futures[future]
-            try:
-                decision = future.result()
-                decisions.append((agent, decision))
-                print(f"  [round_runner] {agent['id']}: {decision.get('action_type', 'idle')} — {decision.get('content', '')[:60]}")
-            except Exception as e:
-                print(f"  [round_runner] {agent['id']} failed: {e}", file=sys.stderr)
-                decisions.append((agent, {"action_type": "idle", "content": "", "target": "", "reasoning": str(e)}))
+    # Run sequentially in the main thread (signal.alarm requires main thread)
+    for i, agent in enumerate(agents):
+        if i > 0:
+            _time.sleep(_AGENT_DELAY_SECONDS)  # Stagger calls to avoid API rate limits
+        try:
+            decision = _run_agent_subagent(agent, state, model, base_url)
+            decisions.append((agent, decision))
+            print(f"  [round_runner] {agent['id']}: {decision.get('action_type', 'idle')} — {decision.get('content', '')[:60]}")
+        except Exception as e:
+            print(f"  [round_runner] {agent['id']} failed: {e}", file=sys.stderr)
+            decisions.append((agent, {"action_type": "idle", "content": "", "target": "", "reasoning": str(e)}))
 
     state = _apply_decisions(state, decisions)
 
